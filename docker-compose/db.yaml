@@ -1,0 +1,142 @@
+x-logging: &default-logging
+    driver: "json-file"
+    options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+    net:
+        name: net
+        driver: bridge
+
+services:
+    recruitai-vacancy-postgres:
+        image: postgres:latest
+        container_name: "${RECRUITAI_VACANCY_POSTGRES_CONTAINER_NAME}"
+        volumes:
+            - "../${RECRUITAI_VACANCY_POSTGRES_VOLUME_DIR}:/var/lib/postgresql/data"
+        ports:
+            - "${RECRUITAI_VACANCY_POSTGRES_PORT}:5432"
+        environment:
+            POSTGRES_DB: "${RECRUITAI_VACANCY_POSTGRES_DB_NAME}"
+            POSTGRES_USER: "${RECRUITAI_VACANCY_POSTGRES_USER}"
+            POSTGRES_PASSWORD: "${RECRUITAI_VACANCY_POSTGRES_PASSWORD}"
+        logging: *default-logging
+        restart: unless-stopped
+        networks:
+            - net
+
+
+
+    recruitai-monitoring-redis:
+        image: redis:8.0.2
+        container_name: "${RECRUITAI_MONITORING_REDIS_CONTAINER_NAME}"
+        volumes:
+            - "../${RECRUITAI_MONITORING_REDIS_CONFIG_FILE}:/etc/redis/redis.conf"
+            - "../${RECRUITAI_MONITORING_REDIS_VOLUME_DIR}:/data"
+        ports:
+            - "${RECRUITAI_MONITORING_REDIS_PORT}:6379"
+        command: "redis-server /etc/redis/redis.conf"
+        logging: *default-logging
+        restart: unless-stopped
+        networks:
+            - net
+
+    recruitai-loki:
+        image: grafana/loki:3.5.1
+        container_name: "${RECRUITAI_LOKI_CONTAINER_NAME}"
+        volumes:
+            - "../${RECRUITAI_LOKI_CONFIG_FILE}:/etc/loki/loki.yaml:ro"
+            - "../${RECRUITAI_LOKI_VOLUME_DIR}:/loki"
+        ports:
+            - "${RECRUITAI_LOKI_HTTP_PORT}:${RECRUITAI_LOKI_HTTP_PORT}"
+            - "${RECRUITAI_LOKI_GRPC_PORT}:${RECRUITAI_LOKI_GRPC_PORT}"
+        command: [ "-config.file=/etc/loki/loki.yaml" ]
+        logging: *default-logging
+        restart: unless-stopped
+        networks:
+            - net
+
+    recruitai-tempo:
+        image: grafana/tempo:2.7.2
+        container_name: "${RECRUITAI_TEMPO_CONTAINER_NAME}"
+        volumes:
+            - "../${RECRUITAI_TEMPO_CONFIG_FILE}:/etc/tempo/tempo.yaml:ro"
+            - "../${RECRUITAI_TEMPO_VOLUME_DIR}:/var/tempo"
+        ports:
+            - "${RECRUITAI_TEMPO_HTTP_PORT}:${RECRUITAI_TEMPO_HTTP_PORT}"
+            - "${RECRUITAI_TEMPO_GRPC_PORT}:${RECRUITAI_TEMPO_GRPC_PORT}"
+            - "${RECRUITAI_TEMPO_OTLP_HTTP_PORT}:${RECRUITAI_TEMPO_OTLP_HTTP_PORT}"
+            - "${RECRUITAI_TEMPO_OTLP_GRPC_PORT}:${RECRUITAI_TEMPO_OTLP_GRPC_PORT}"
+        command: [ "-config.file=/etc/tempo/tempo.yaml" ]
+        logging: *default-logging
+        restart: unless-stopped
+        networks:
+            - net
+
+    recruitai-victoria-metrics:
+        image: victoriametrics/victoria-metrics:v1.118.0
+        container_name: "${RECRUITAI_VICTORIA_METRICS_CONTAINER_NAME}"
+        volumes:
+            - "../${RECRUITAI_VICTORIA_METRICS_VOLUME_DIR}:/victoria-metrics-data"
+        ports:
+            - "${RECRUITAI_VICTORIA_METRICS_HTTP_PORT}:${RECRUITAI_VICTORIA_METRICS_HTTP_PORT}"
+        command:
+            - '-storageDataPath=/victoria-metrics-data'
+            - '-retentionPeriod=30d'
+            - '-httpListenAddr=:8428'
+            - '-memory.allowedPercent=80'
+            - '-search.maxUniqueTimeseries=1000000'
+            - '-search.maxQueryDuration=120s'
+        logging: *default-logging
+        restart: unless-stopped
+        networks:
+            - net
+
+    recruitai-weed-master:
+        image: chrislusf/seaweedfs
+        logging: *default-logging
+        container_name: recruitai-weed-master
+        ports:
+            - "${RECRUITAI_WEED_MASTER_PORT}:${RECRUITAI_WEED_MASTER_PORT}"
+        command: "master"
+        networks:
+            - net
+
+    recruitai-weed-volume:
+        image: chrislusf/seaweedfs:latest
+        container_name: recruitai-weed-volume
+        command: >
+            volume 
+            -mserver="${RECRUITAI_WEED_MASTER_CONTAINER_NAME}:${RECRUITAI_WEED_MASTER_PORT}" 
+            -ip.bind=0.0.0.0 
+            -port=8080 
+            -dir="/data"
+            -max=10
+            -metricsPort=9325
+            -dataCenter=dc1
+            -rack=rack2
+        volumes:
+            - "../${RECRUITAI_WEED_VOLUME_DIR}:/data"
+        depends_on:
+            - recruitai-weed-master
+        networks:
+            - net
+        restart: unless-stopped
+        logging: *default-logging
+
+    recruitai-weed-filer:
+        image: chrislusf/seaweedfs:latest
+        container_name: recruitai-weed-filer
+        command: >
+            filer 
+            -master="${RECRUITAI_WEED_MASTER_CONTAINER_NAME}:${RECRUITAI_WEED_MASTER_PORT}"
+            -ip.bind=0.0.0.0 
+            -metricsPort=9327
+        depends_on:
+            - recruitai-weed-master
+            - recruitai-weed-volume
+        networks:
+            - net
+        restart: unless-stopped
+        logging: *default-logging
