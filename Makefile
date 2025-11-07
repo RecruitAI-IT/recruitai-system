@@ -2,13 +2,10 @@
 .PHONY: rebuild-app stop-app
 .PHONY: rebuild-monitoring stop-monitoring
 .PHONY: rebuild-db stop-db
-.PHONY: set-dev-env set-prod-env set-env-to-config-template
+.PHONY: set-env set-env-to-config-template
 
-set-dev-env:
-	@export $(cat env/dev/.env.app env/dev/.env.db env/dev/.env.monitoring | xargs)
-
-set-prod-env:
-	@export $(cat env/prod/.env env/prod/.env.app env/prod/.env.db env/prod/.env.monitoring | xargs)
+set-env:
+	@export $(cat env/.env.app env/.env.db env/.env.monitoring | xargs)
 
 set-env-to-config-template:
 	@envsubst < ${RECRUITAI_LOKI_CONFIG_FILE}.template > ${RECRUITAI_LOKI_CONFIG_FILE}
@@ -17,6 +14,9 @@ set-env-to-config-template:
 	@envsubst < ${RECRUITAI_OTEL_COLLECTOR_CONFIG_FILE}.template > ${RECRUITAI_OTEL_COLLECTOR_CONFIG_FILE}
 
 deploy:
+	@apt update && apt upgrade -y
+	@apt install python3-pip git make
+	@pip install requests --break-system-packages
 	@cd ..
 	@git@github.com:RecruitAI-IT/recruitai-vacancy.git
 	@git@github.com:RecruitAI-IT/recruitai-frontend.git
@@ -44,8 +44,8 @@ stop-all:
 
 update-all:
 	@git pull
-	@cd ../recruitai-vacancy/ && git pull && cd ../recruitai-system/
-	@cd ../recruitai-frontend/ && git pull && cd ../recruitai-system/
+	@cd ../recruitai-vacancy/ && git fetch origin && git checkout main && git reset --hard origin/main && cd ../recruitai-system/
+	@cd ../recruitai-frontend/ && git fetch origin && git checkout main && git reset --hard origin/main && cd ../recruitai-system/
 
 rebuild-all: update-all build-all
 
